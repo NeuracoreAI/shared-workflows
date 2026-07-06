@@ -15,6 +15,7 @@ Called with `uses:` at the *job* level from a consumer repo:
 | `pr-check-commit-messages.yaml` | `valid-prefixes`, `runs-on` |
 | `pr-check-label.yaml` | `required-labels`, `runs-on` |
 | `pr-changelog-reminder.yaml`| `trigger-labels`, `changelog-path`, `runs-on` |
+| `integration-ml-test.yaml` | `environment` (staging \| production), `test-path`, `extras`, `lfs` |
 
 ### Composite actions (`actions/`)
 
