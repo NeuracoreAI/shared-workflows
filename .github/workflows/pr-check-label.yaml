@@ -1,0 +1,45 @@
+name: PR Check Label
+
+on:
+  workflow_call:
+    inputs:
+      required-labels:
+        description: "Comma-separated list of labels; exactly one must be present on the PR"
+        required: false
+        type: string
+        default: "version:major,version:minor,version:patch,version:none"
+      runs-on:
+        description: "Runner image"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
+jobs:
+  check-version-label:
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+    - name: Check for version label
+      uses: actions/github-script@v7
+      env:
+        REQUIRED_LABELS: ${{ inputs.required-labels }}
+      with:
+        script: |
+          const pr = context.payload.pull_request;
+          const labels = pr.labels.map(label => label.name);
+
+          console.log('PR Labels:', labels);
+
+          // Define valid version labels
+          const versionLabels = process.env.REQUIRED_LABELS.split(',').map(l => l.trim());
+
+          // Check for only one and return success or fail
+          const versionLabelCount = labels.filter(label => versionLabels.includes(label)).length;
+
+          if (versionLabelCount === 0) {
+            core.setFailed(`PR is missing a version label. Please add one of: ${versionLabels.join(', ')}`);
+          } else if (versionLabelCount > 1) {
+            core.setFailed(`PR has multiple version labels. Please keep only one of: ${versionLabels.join(', ')}`);
+          } else {
+            console.log('✅ PR has a valid version label:', labels.filter(l => versionLabels.includes(l)));
+          }

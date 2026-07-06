@@ -1,0 +1,76 @@
+name: PR Changelog Reminder
+
+on:
+  workflow_call:
+    inputs:
+      trigger-labels:
+        description: "Comma-separated list of labels that trigger the reminder"
+        required: false
+        type: string
+        default: "version:major,version:minor"
+      changelog-path:
+        description: "Path of the pending changelog file mentioned in the reminder"
+        required: false
+        type: string
+        default: "changelogs/pending-changelog.md"
+      runs-on:
+        description: "Runner image"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
+jobs:
+  suggest-changelog-update:
+    runs-on: ${{ inputs.runs-on }}
+
+    permissions:
+      pull-requests: write
+
+    steps:
+    - name: Check for existing comment and post reminder
+      uses: actions/github-script@v7
+      env:
+        TRIGGER_LABELS: ${{ inputs.trigger-labels }}
+        CHANGELOG_PATH: ${{ inputs.changelog-path }}
+      with:
+        script: |
+          const prNumber = context.payload.pull_request.number;
+          const commentIdentifier = '<!-- changelog-reminder-bot -->';
+
+          // Only remind when one of the trigger labels is present
+          const triggerLabels = process.env.TRIGGER_LABELS.split(',').map(l => l.trim());
+          const prLabels = context.payload.pull_request.labels.map(l => l.name);
+
+          if (!prLabels.some(label => triggerLabels.includes(label))) {
+            console.log('No trigger label on PR - skipping reminder');
+            return;
+          }
+
+          // Check if comment already exists
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: prNumber
+          });
+
+          const existingComment = comments.find(comment =>
+            comment.body.includes(commentIdentifier)
+          );
+
+          if (existingComment) {
+            console.log('Reminder comment already exists - skipping');
+            return;
+          }
+
+          // Post reminder comment
+          const commentBody = commentIdentifier + '\n\n' +
+            `Consider updating ${process.env.CHANGELOG_PATH} with a summary of this change for the release notes. This is optional and non-blocking.`;
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: prNumber,
+            body: commentBody
+          });
+
+          console.log('Posted changelog reminder comment');
