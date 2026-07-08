@@ -44,6 +44,11 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: ${{ inputs.path }}/rust
+        # One cache shared by every workflow in the calling repo (default key
+        # includes the job ID, which splits it per-workflow), saved even when
+        # the test job fails so flaky suites still warm the cache.
+        shared-key: neuracore-daemon
+        cache-on-failure: "true"
 
     # The daemon shells out to the system ffmpeg for video encoding and
     # hard-fails at startup without it.
