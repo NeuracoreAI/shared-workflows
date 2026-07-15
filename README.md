@@ -23,6 +23,7 @@ Referenced at the *step* level:
 
 | Action | Purpose |
 |---|---|
+| `actions/checkout-test-harness` | Checks out the calling repo's integration test suite at the right ref and prints a harness summary. staging: the caller's branch; production: the latest `v*` release tag, verified after checkout (an explicit `ref` input overrides both). Optional LFS pull. Exposes the resolved `ref` and the production `release-tag` (for installing the matching released package). |
 | `actions/setup-neuracore-daemon-from-source` | Checkout of the neuracore source (optional) + Rust toolchain + cargo cache + FFmpeg + build daemon binary + `pip install .` + verify the bundled daemon. Works both from consumer repos (frontend, with `path: neuracore`) and inside the `neuracore` repo itself (`checkout: "false"`, `path: "."`). Production-style installs from PyPI stay inline in the consumer workflows for now (they are a short pip install + verify, with no Rust/checkout machinery to share). |
 
 ## Consumer usage

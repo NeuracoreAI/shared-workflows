@@ -1,0 +1,102 @@
+name: "Checkout integration test harness"
+description: >
+  Checks out the calling repo's integration test suite (the test harness) at
+  the right ref for the target environment, then prints a harness summary.
+  staging: the caller's branch. production: the latest v* release tag,
+  verified after checkout. An explicit ref input overrides both. On
+  production the release tag is exposed as an output so the matching released
+  package can be installed.
+
+inputs:
+  environment:
+    description: "Environment to test against: staging or production"
+    required: true
+  ref:
+    description: "Explicit commit SHA, tag, or branch override. Empty resolves per environment."
+    required: false
+    default: ""
+  lfs:
+    description: "Pull Git LFS objects after checkout"
+    required: false
+    default: "false"
+
+outputs:
+  ref:
+    description: "Ref the harness was checked out at"
+    value: ${{ steps.harness-ref.outputs.harness_ref }}
+  release-tag:
+    description: "Latest release tag, e.g. v1.2.3 (production only, empty on staging)"
+    value: ${{ steps.release-tag.outputs.latest_release_tag }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository metadata
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Resolve latest release tag
+      if: inputs.environment == 'production'
+      id: release-tag
+      shell: bash
+      run: |
+        latest_release_tag="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+        if [ -z "$latest_release_tag" ]; then
+          echo "::error::No release tag matching v* found"
+          exit 1
+        fi
+        echo "latest_release_tag=$latest_release_tag" >> "$GITHUB_OUTPUT"
+        echo "Latest release tag: $latest_release_tag"
+
+    - name: Resolve test harness ref
+      id: harness-ref
+      shell: bash
+      env:
+        ENVIRONMENT: ${{ inputs.environment }}
+        INPUT_REF: ${{ inputs.ref }}
+        RELEASE_TAG: ${{ steps.release-tag.outputs.latest_release_tag }}
+        BRANCH_REF: ${{ github.ref_name }}
+      run: |
+        if [ -n "$INPUT_REF" ]; then
+          harness_ref="$INPUT_REF"
+        elif [ "$ENVIRONMENT" = "production" ]; then
+          harness_ref="$RELEASE_TAG"
+        else
+          harness_ref="$BRANCH_REF"
+        fi
+        echo "harness_ref=$harness_ref" >> "$GITHUB_OUTPUT"
+        echo "Resolved test harness ref: $harness_ref"
+
+    - name: Checkout test harness
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ steps.harness-ref.outputs.harness_ref }}
+        fetch-depth: 0
+
+    - name: Verify production test harness ref
+      if: inputs.environment == 'production' && inputs.ref == ''
+      shell: bash
+      env:
+        EXPECTED_REF: ${{ steps.release-tag.outputs.latest_release_tag }}
+      run: |
+        checked_out_ref="$(git describe --tags --exact-match HEAD)"
+        if [ "$checked_out_ref" != "$EXPECTED_REF" ]; then
+          echo "::error::Expected production test harness ref $EXPECTED_REF, got $checked_out_ref"
+          exit 1
+        fi
+
+    - name: Pull LFS objects
+      if: inputs.lfs == 'true'
+      shell: bash
+      run: git lfs pull
+
+    - name: Resolve test harness
+      shell: bash
+      env:
+        ENVIRONMENT: ${{ inputs.environment }}
+        HARNESS_REF: ${{ steps.harness-ref.outputs.harness_ref }}
+      run: |
+        echo "Test harness environment: $ENVIRONMENT"
+        echo "Test harness ref: $HARNESS_REF"
+        echo "Test harness commit: $(git rev-parse HEAD)"
