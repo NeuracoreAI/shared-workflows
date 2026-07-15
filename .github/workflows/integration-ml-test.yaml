@@ -66,28 +66,18 @@ jobs:
 
       - name: Set up neuracore with Rust data daemon
         if: inputs.environment == 'staging'
-        uses: NeuracoreAI/shared-workflows/actions/setup-neuracore-daemon-from-source@main
+        uses: NeuracoreAI/shared-workflows/actions/setup-neuracore-from-source@main
         with:
           checkout: "false"
           path: "."
           extras: ${{ inputs.extras }}
 
-      - name: Install neuracore from PyPI
+      - name: Set up neuracore from PyPI
         if: inputs.environment == 'production'
-        env:
-          VERSION: ${{ steps.harness.outputs.release-tag }}
-          EXTRAS: ${{ inputs.extras }}
-        run: |
-          python -m pip install --no-cache-dir --upgrade pip
-          pip install --no-cache-dir "neuracore[$EXTRAS]==${VERSION#v}"
-
-      - name: Verify installed neuracore
-        run: |
-          python - << 'EOF'
-          import neuracore
-
-          print(f"Installed neuracore version: {neuracore.__version__}")
-          EOF
+        uses: NeuracoreAI/shared-workflows/actions/setup-neuracore-from-pypi@main
+        with:
+          version: ${{ steps.harness.outputs.release-tag }}
+          extras: ${{ inputs.extras }}
 
       - name: Run Integration Test
         env:
@@ -114,5 +104,4 @@ jobs:
             "$TEST_PATH"
 
       - name: Show disk space after tests
-        if: always()
         run: df -h /

@@ -1,0 +1,54 @@
+name: "Set up Neuracore (from PyPI)"
+description: >
+  Installs the released neuracore wheel from PyPI, optionally pinned to a
+  release tag (e.g. the release-tag output of checkout-test-harness), then
+  verifies the install by importing neuracore and printing its version.
+  Used by production-style integration tests. Python must already be set up
+  by the caller (actions/setup-python).
+
+inputs:
+  version:
+    description: "Version to install, e.g. 'v1.2.3' or '1.2.3' (a leading 'v' is stripped). Empty installs the latest release."
+    required: false
+    default: ""
+  extras:
+    description: "Comma-separated pip extras, e.g. 'dev,ml,examples'"
+    required: false
+    default: ""
+  pytorch-cpu:
+    description: "Add the PyTorch CPU wheel index (used with the 'import' extra on CI runners)"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install neuracore from PyPI
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        EXTRAS: ${{ inputs.extras }}
+        PYTORCH_CPU: ${{ inputs.pytorch-cpu }}
+      run: |
+        python -m pip install --no-cache-dir --upgrade pip
+        spec="neuracore"
+        if [ -n "$EXTRAS" ]; then
+          spec="neuracore[$EXTRAS]"
+        fi
+        if [ -n "$VERSION" ]; then
+          spec="$spec==${VERSION#v}"
+        fi
+        if [ "$PYTORCH_CPU" = "true" ]; then
+          pip install --no-cache-dir "$spec" --extra-index-url https://download.pytorch.org/whl/cpu
+        else
+          pip install --no-cache-dir "$spec"
+        fi
+
+    - name: Verify installed neuracore
+      shell: bash
+      run: |
+        python - << 'EOF'
+        import neuracore
+
+        print(f"Installed neuracore version: {neuracore.__version__}")
+        EOF

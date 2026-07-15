@@ -1,9 +1,10 @@
-name: "Set up Neuracore with Rust data daemon (from source)"
+name: "Set up Neuracore (from source)"
 description: >
   Checks out the neuracore source, builds the Rust data-daemon
   binary with rust/scripts/build_wheel_artefacts.sh and installs the neuracore
   Python package from the checkout so maturin bundles the binary into the
-  wheel, then verifies the bundle. Used by staging-style integration tests.
+  wheel, then verifies the installed package and daemon bundle. Used by
+  staging-style integration tests.
   Python must already be set up by the caller (actions/setup-python).
 
 inputs:
@@ -95,14 +96,17 @@ runs:
 
     # cd away from the checkout so `import neuracore` resolves to the
     # installed wheel, not the source tree the binary was staged into.
-    - name: Verify bundled Rust daemon
+    - name: Verify installed neuracore
       shell: bash
       run: |
         cd "$RUNNER_TEMP"
         python - << 'PYEOF'
         import os
 
+        import neuracore
         from neuracore.data_daemon.rust_selection import rust_daemon_binary_path
+
+        print(f"Installed neuracore version: {neuracore.__version__}")
 
         # Fail fast if the daemon bundle didn't install -- otherwise the SDK
         # silently falls back to the Python daemon.

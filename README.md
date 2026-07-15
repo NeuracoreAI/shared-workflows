@@ -24,7 +24,8 @@ Referenced at the *step* level:
 | Action | Purpose |
 |---|---|
 | `actions/checkout-test-harness` | Checks out the calling repo's integration test suite at the right ref and prints a harness summary. staging: the caller's branch; production: the latest `v*` release tag, verified after checkout (an explicit `ref` input overrides both). Optional LFS pull. Exposes the resolved `ref` and the production `release-tag` (for installing the matching released package). |
-| `actions/setup-neuracore-daemon-from-source` | Checkout of the neuracore source (optional) + Rust toolchain + cargo cache + FFmpeg + build daemon binary + `pip install .` + verify the bundled daemon. Works both from consumer repos (frontend, with `path: neuracore`) and inside the `neuracore` repo itself (`checkout: "false"`, `path: "."`). Production-style installs from PyPI stay inline in the consumer workflows for now (they are a short pip install + verify, with no Rust/checkout machinery to share). |
+| `actions/setup-neuracore-from-source` | Checkout of the neuracore source (optional) + Rust toolchain + cargo cache + FFmpeg + build daemon binary + `pip install .` + verify the bundled daemon. Works both from consumer repos (frontend, with `path: neuracore`) and inside the `neuracore` repo itself (`checkout: "false"`, `path: "."`). |
+| `actions/setup-neuracore-from-pypi` | Installs the released `neuracore` wheel from PyPI, optionally pinned to a version (e.g. the `release-tag` output of `checkout-test-harness`), with optional pip extras and PyTorch CPU wheel index, then verifies the install by importing it. Used by production-style integration tests. |
 
 ## Consumer usage
 
@@ -42,13 +43,13 @@ jobs:
 Composite action (step level):
 
 ```yaml
-- uses: NeuracoreAI/shared-workflows/actions/setup-neuracore-daemon-from-source@main
+- uses: NeuracoreAI/shared-workflows/actions/setup-neuracore-from-source@main
   with:
     path: neuracore
 ```
 
 Notes:
 
-- Python must be set up by the caller before the daemon setup actions (cache
+- Python must be set up by the caller before the neuracore setup actions (cache
   paths are repo-specific).
 
