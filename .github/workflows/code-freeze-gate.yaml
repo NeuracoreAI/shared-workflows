@@ -1,0 +1,225 @@
+name: Code Freeze Gate
+
+# Blocks feature PRs while any nightly integration suite is failing. Mirrors
+# the CI dashboard's workflow selection (ci_dashboard/scripts/fetch_actions_data.py);
+# pass/fail is the latest schedule/workflow_dispatch run that concluded
+# success or failure, so a manual re-run after a fix lifts the freeze without
+# waiting for the next night and cancelled runs carry no signal.
+# PRs labeled type:hotfix are exempt. State is reported as the `code-freeze`
+# commit status on each PR head SHA plus a marker comment while blocked.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: "Runner image"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      actions-read-token:
+        description: "Token with actions:read on the integration-test repos"
+        required: true
+
+jobs:
+  gate:
+    runs-on: ${{ inputs.runs-on }}
+
+    permissions:
+      statuses: write
+      pull-requests: write
+
+    steps:
+    - name: Check token availability
+      id: guard
+      env:
+        ACTIONS_READ_TOKEN: ${{ secrets.actions-read-token }}
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        if [ -n "$ACTIONS_READ_TOKEN" ]; then
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        elif [ "$EVENT_NAME" = "pull_request" ]; then
+          # Fork and dependabot events run without secrets; the sweep gates those PRs.
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "actions-read-token secret is not configured" >&2
+          exit 1
+        fi
+
+    - name: Compute freeze state
+      id: freeze
+      if: steps.guard.outputs.skip != 'true'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.actions-read-token }}
+        retries: 3
+        script: |
+          const owner = 'NeuracoreAI';
+          const repos = ['neuracore', 'neuracore_frontend', 'neuracore_backend'];
+          const envRe = /\((production|staging)\)\s*$/i;
+
+          const failing = [];
+          let tracked = 0;
+          try {
+            for (const repo of repos) {
+              const workflows = await github.paginate(github.rest.actions.listRepoWorkflows, {
+                owner, repo, per_page: 100
+              });
+              for (const wf of workflows) {
+                const filename = wf.path.split('/').pop().toLowerCase();
+                if (!filename.startsWith('integration')) continue;
+
+                const { data } = await github.rest.actions.listWorkflowRuns({
+                  owner, repo, workflow_id: wf.id, per_page: 50
+                });
+                const runs = data.workflow_runs;
+                if (!runs.some(run => run.event === 'schedule')) continue;
+
+                tracked++;
+                const latest = runs.find(run =>
+                  (run.event === 'schedule' || run.event === 'workflow_dispatch') &&
+                  run.status === 'completed' &&
+                  (run.conclusion === 'success' || run.conclusion === 'failure'));
+                if (!latest || latest.conclusion === 'success') continue;
+
+                const match = envRe.exec(wf.name);
+                failing.push({
+                  name: wf.name,
+                  repo,
+                  env: match ? match[1].toLowerCase() : 'other',
+                  url: latest.html_url,
+                });
+              }
+            }
+            if (tracked === 0) {
+              throw new Error('No scheduled integration workflows found - token or selection logic is broken');
+            }
+            console.log(`Tracked ${tracked} workflows, ${failing.length} failing`);
+            core.setOutput('state', JSON.stringify({ error: false, frozen: failing.length > 0, failing }));
+          } catch (error) {
+            console.log(`Failed to compute freeze state: ${error.message}`);
+            core.setOutput('state', JSON.stringify({ error: true, frozen: false, failing: [] }));
+          }
+
+    - name: Apply gate to pull requests
+      if: steps.guard.outputs.skip != 'true'
+      uses: actions/github-script@v7
+      env:
+        FREEZE_STATE: ${{ steps.freeze.outputs.state }}
+      with:
+        script: |
+          const { error, frozen, failing } = JSON.parse(process.env.FREEZE_STATE);
+          const statusContext = 'code-freeze';
+          const commentIdentifier = '<!-- code-freeze-bot -->';
+          const dashboardUrl = 'https://ci-dashboard-neuracore.pages.dev';
+          const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+          const failingList = failing
+            .map(wf => `- [${wf.name}](${wf.url}) (\`${wf.repo}\`, ${wf.env})`)
+            .join('\n');
+          const commentBody = commentIdentifier + '\n\n' +
+            '## Code freeze: merging is blocked\n\n' +
+            'One or more nightly integration test suites are failing, so feature PRs across the ' +
+            'core repos are blocked from merging until every suite is green again. ' +
+            `Live status: [CI dashboard](${dashboardUrl}).\n\n` +
+            '**Failing workflows:**\n\n' +
+            failingList + '\n\n' +
+            '**How this unblocks**\n\n' +
+            '- The freeze lifts automatically: this check re-runs every 30 minutes and on any label ' +
+            'change. Once the failing suites pass (tonight\'s scheduled run, or a manual re-run of ' +
+            'the failing workflow after a fix lands), the block and this comment are removed.\n' +
+            '- The dashboard\'s default view tracks nightly scheduled runs only, so it can still ' +
+            'show red for a while after a manual re-run has already lifted the freeze.\n' +
+            '- To force an immediate re-check, run the **Code Freeze** workflow in this repo from the ' +
+            'Actions tab (Run workflow).\n\n' +
+            '**Shipping a fix for the outage itself?** Add the `type:hotfix` label to this PR and it ' +
+            'is exempt from the freeze. Use it only for changes that fix or mitigate the failing ' +
+            'tests or a production incident, not to land regular features during a freeze. Hotfix ' +
+            'PRs are flagged in the release notes.';
+
+          async function gatePr(pr) {
+            const exempt = pr.labels.some(label => label.name === 'type:hotfix');
+            const blocked = !error && frozen && !exempt;
+
+            let state, description;
+            if (exempt) {
+              state = 'success';
+              description = 'This PR is exempt from code freeze (type:hotfix)';
+            } else if (error) {
+              state = 'error';
+              description = 'Could not determine nightly CI health - see gate run logs';
+            } else if (blocked) {
+              state = 'failure';
+              description = `Code freeze: ${failing.length} nightly integration workflow(s) failing`;
+            } else {
+              state = 'success';
+              description = 'Nightly integration tests are green';
+            }
+
+            // Statuses are append-only (1000 per SHA cap): write only on change.
+            const { data: combined } = await github.rest.repos.getCombinedStatusForRef({
+              ...context.repo, ref: pr.head.sha
+            });
+            const current = combined.statuses.find(status => status.context === statusContext);
+            if (!current || current.state !== state || current.description !== description) {
+              await github.rest.repos.createCommitStatus({
+                ...context.repo,
+                sha: pr.head.sha,
+                state,
+                context: statusContext,
+                description,
+                target_url: error ? runUrl : dashboardUrl,
+              });
+              console.log(`PR #${pr.number}: status -> ${state}`);
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: pr.number, per_page: 100
+            });
+            // Concurrent sweep and PR-event runs can race createComment; keep
+            // the first marker comment and clean up any duplicates.
+            const markers = comments.filter(comment => comment.body.includes(commentIdentifier));
+            const existing = markers[0];
+            for (const duplicate of markers.slice(1)) {
+              await github.rest.issues.deleteComment({ ...context.repo, comment_id: duplicate.id });
+            }
+            if (blocked) {
+              if (!existing) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: pr.number, body: commentBody
+                });
+              } else if (existing.body !== commentBody) {
+                await github.rest.issues.updateComment({
+                  ...context.repo, comment_id: existing.id, body: commentBody
+                });
+              }
+            } else if ((exempt || !error) && existing) {
+              await github.rest.issues.deleteComment({
+                ...context.repo, comment_id: existing.id
+              });
+            }
+          }
+
+          if (context.eventName === 'pull_request') {
+            await gatePr(context.payload.pull_request);
+          } else {
+            const prs = await github.paginate(github.rest.pulls.list, {
+              ...context.repo, state: 'open', base: 'main', per_page: 100
+            });
+            console.log(`Sweeping ${prs.length} open PR(s)`);
+            const failures = [];
+            for (const pr of prs) {
+              try {
+                await gatePr(pr);
+              } catch (gateError) {
+                failures.push(`#${pr.number}: ${gateError.message}`);
+              }
+            }
+            if (failures.length > 0) {
+              core.setFailed(`Failed to gate ${failures.length} PR(s): ${failures.join('; ')}`);
+            }
+          }
+
+          if (error) {
+            core.setFailed('Freeze state could not be computed - gate wrote error statuses');
+          }
