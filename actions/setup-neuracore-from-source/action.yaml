@@ -24,6 +24,10 @@ inputs:
     description: "Add the PyTorch CPU wheel index (used with the 'import' extra on CI runners)"
     required: false
     default: "false"
+  neuracore-types-ref:
+    description: "Git ref of neuracore_types to install over the PyPI copy. Set to '' to keep the published version."
+    required: false
+    default: "main"
 
 runs:
   using: "composite"
@@ -93,6 +97,16 @@ runs:
         else
           pip install --no-cache-dir "$spec"
         fi
+
+    # Staging tests run against unreleased neuracore_types.
+    - name: Install neuracore_types from git ref
+      if: inputs.neuracore-types-ref != ''
+      shell: bash
+      env:
+        NEURACORE_TYPES_REF: ${{ inputs.neuracore-types-ref }}
+      run: |
+        pip install --no-cache-dir --force-reinstall --no-deps \
+          "neuracore_types @ git+https://github.com/NeuracoreAI/neuracore_types.git@${NEURACORE_TYPES_REF}"
 
     # cd away from the checkout so `import neuracore` resolves to the
     # installed wheel, not the source tree the binary was staged into.
