@@ -23,6 +23,18 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # The daemon shells out to the system ffmpeg for video encoding and
+    # hard-fails at startup without it.
+    - name: Install FFmpeg
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = "macOS" ]; then
+          brew install ffmpeg
+        else
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+        fi
+      
     - name: Install neuracore from PyPI
       shell: bash
       env:
