@@ -4,10 +4,9 @@ name: Integration ML Test
 # neuracore repo's integration-ml-* workflows.
 #
 # environment: staging    — checks out the caller's ref, builds and installs
-#   neuracore from source with the bundled Rust data daemon (NCD_RUST_DAEMON=1).
+#   neuracore from source with the bundled data daemon.
 # environment: production — resolves the latest v* release tag, checks out the
-#   test harness at that tag and installs the released wheel from PyPI (which
-#   exercises the default Python daemon).
+#   test harness at that tag and installs the released wheel from PyPI.
 
 on:
   workflow_call:
@@ -89,11 +88,6 @@ jobs:
           DISPLAY: :0
           TEST_PATH: ${{ inputs.test-path }}
         run: |
-          # Staging exercises the bundled Rust daemon; production keeps the
-          # released wheel's default (Python daemon).
-          if [ "$ENVIRONMENT" = "staging" ]; then
-            export NCD_RUST_DAEMON=1
-          fi
           Xvfb $DISPLAY -screen 0 1280x1024x24 &
           pytest \
             -o log_cli=true \

@@ -69,8 +69,8 @@ runs:
 
     # Build the standalone daemon binary before `pip install .` so the
     # [tool.maturin] include bundles it into the built wheel; without it the
-    # SDK silently falls back to the Python daemon.
-    - name: Build Rust data-daemon binary
+    # SDK has no daemon to launch.
+    - name: Build data-daemon binary
       shell: bash
       working-directory: ${{ inputs.path }}
       run: |
@@ -118,15 +118,15 @@ runs:
         import os
 
         import neuracore
-        from neuracore.data_daemon.rust_selection import rust_daemon_binary_path
+        from neuracore.data_daemon.binary import data_daemon_binary_path
 
         print(f"Installed neuracore version: {neuracore.__version__}")
 
-        # Fail fast if the daemon bundle didn't install -- otherwise the SDK
-        # silently falls back to the Python daemon.
-        binary = rust_daemon_binary_path()
+        # Fail fast if the daemon bundle didn't install -- otherwise every
+        # daemon-backed call fails later with a less obvious error.
+        binary = data_daemon_binary_path()
         assert binary is not None, (
-            "bundled Rust data-daemon binary not found; the neuracore "
+            "bundled data-daemon binary not found; the neuracore "
             "install did not bundle it"
         )
         assert os.access(binary, os.X_OK), f"daemon binary not executable: {binary}"
