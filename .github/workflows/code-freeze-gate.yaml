@@ -1,7 +1,9 @@
 name: Code Freeze Gate
 
-# Blocks feature PRs while any nightly integration suite is failing. Mirrors
-# the CI dashboard's workflow selection (ci_dashboard/scripts/fetch_actions_data.py);
+# Blocks feature PRs while any nightly staging integration suite is failing.
+# Production suites stay visible on the CI dashboard but do not gate merges.
+# Workflow selection matches the CI dashboard (ci_dashboard/scripts/fetch_actions_data.py),
+# restricted to staging suites;
 # pass/fail is the latest schedule/workflow_dispatch run that concluded
 # success or failure, so a manual re-run after a fix lifts the freeze without
 # waiting for the next night and cancelled runs carry no signal.
@@ -56,7 +58,7 @@ jobs:
         script: |
           const owner = 'NeuracoreAI';
           const repos = ['neuracore', 'neuracore_frontend', 'neuracore_backend'];
-          const envRe = /\((production|staging)\)\s*$/i;
+          const stagingRe = /\(staging\)\s*$/i;
 
           const failing = [];
           let tracked = 0;
@@ -68,6 +70,7 @@ jobs:
               for (const wf of workflows) {
                 const filename = wf.path.split('/').pop().toLowerCase();
                 if (!filename.startsWith('integration')) continue;
+                if (!stagingRe.test(wf.name)) continue;
 
                 const { data } = await github.rest.actions.listWorkflowRuns({
                   owner, repo, workflow_id: wf.id, per_page: 50
@@ -82,17 +85,15 @@ jobs:
                   (run.conclusion === 'success' || run.conclusion === 'failure'));
                 if (!latest || latest.conclusion === 'success') continue;
 
-                const match = envRe.exec(wf.name);
                 failing.push({
                   name: wf.name,
                   repo,
-                  env: match ? match[1].toLowerCase() : 'other',
                   url: latest.html_url,
                 });
               }
             }
             if (tracked === 0) {
-              throw new Error('No scheduled integration workflows found - token or selection logic is broken');
+              throw new Error('No scheduled staging integration workflows found - token or selection logic is broken');
             }
             console.log(`Tracked ${tracked} workflows, ${failing.length} failing`);
             core.setOutput('state', JSON.stringify({ error: false, frozen: failing.length > 0, failing }));
@@ -115,12 +116,13 @@ jobs:
           const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
           const failingList = failing
-            .map(wf => `- [${wf.name}](${wf.url}) (\`${wf.repo}\`, ${wf.env})`)
+            .map(wf => `- [${wf.name}](${wf.url}) (\`${wf.repo}\`)`)
             .join('\n');
           const commentBody = commentIdentifier + '\n\n' +
             '## Code freeze: merging is blocked\n\n' +
-            'One or more nightly integration test suites are failing, so feature PRs across the ' +
-            'core repos are blocked from merging until every suite is green again. ' +
+            'One or more nightly staging integration test suites are failing, so feature PRs across ' +
+            'the core repos are blocked from merging until every staging suite is green again. ' +
+            'Production suites do not block merges. ' +
             `Live status: [CI dashboard](${dashboardUrl}).\n\n` +
             '**Failing workflows:**\n\n' +
             failingList + '\n\n' +
@@ -128,8 +130,9 @@ jobs:
             '- The freeze lifts automatically: this check re-runs every 30 minutes and on any label ' +
             'change. Once the failing suites pass (tonight\'s scheduled run, or a manual re-run of ' +
             'the failing workflow after a fix lands), the block and this comment are removed.\n' +
-            '- The dashboard\'s default view tracks nightly scheduled runs only, so it can still ' +
-            'show red for a while after a manual re-run has already lifted the freeze.\n' +
+            '- The dashboard\'s default view tracks nightly scheduled runs only and includes ' +
+            'production suites, so it can still show red after a manual re-run has already lifted ' +
+            'the freeze or when only production suites fail.\n' +
             '- To force an immediate re-check, run the **Code Freeze** workflow in this repo from the ' +
             'Actions tab (Run workflow).\n\n' +
             '**Shipping a fix for the outage itself?** Add the `type:hotfix` label to this PR and it ' +
@@ -150,10 +153,10 @@ jobs:
               description = 'Could not determine nightly CI health - see gate run logs';
             } else if (blocked) {
               state = 'failure';
-              description = `Code freeze: ${failing.length} nightly integration workflow(s) failing`;
+              description = `Code freeze: ${failing.length} nightly staging integration workflow(s) failing`;
             } else {
               state = 'success';
-              description = 'Nightly integration tests are green';
+              description = 'Nightly staging integration tests are green';
             }
 
             // Statuses are append-only (1000 per SHA cap): write only on change.
