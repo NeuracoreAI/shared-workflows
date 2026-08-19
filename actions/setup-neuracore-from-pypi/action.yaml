@@ -24,17 +24,18 @@ runs:
   using: "composite"
   steps:
     # The daemon shells out to the system ffmpeg for video encoding and
-    # hard-fails at startup without it.
+    # hard-fails at startup without it. Both version strings pin the same
+    # ffmpeg 9.0 release; the Linux (BtbN) and macOS arm64 (OSXExperts)
+    # build sources tag it differently.
     - name: Install FFmpeg
+      uses: AnimMouse/setup-ffmpeg@v1.2.5
+      with:
+        version: ${{ runner.os == 'macOS' && '9' || '9.0' }}
+
+    - name: Verify FFmpeg build
       shell: bash
-      run: |
-        if [ "$RUNNER_OS" = "macOS" ]; then
-          brew install ffmpeg
-        else
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-        fi
-      
+      run: ffmpeg -version | grep -q enable-libx264
+
     - name: Install neuracore from PyPI
       shell: bash
       env:
