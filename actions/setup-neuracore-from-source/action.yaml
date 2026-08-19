@@ -56,16 +56,30 @@ runs:
         cache-on-failure: "true"
 
     # The daemon shells out to the system ffmpeg for video encoding and
-    # hard-fails at startup without it.
+    # hard-fails at startup without it. Linux uses a pinned static build
+    # from GitHub releases because apt has hung for hours when the
+    # runners' azure.archive.ubuntu.com mirror is down.
     - name: Install FFmpeg
       shell: bash
+      env:
+        FFMPEG_RELEASE_TAG: autobuild-2026-08-18-15-03
+        FFMPEG_ARCHIVE: ffmpeg-n8.1.2-44-g7c533d0f86-linux64-gpl-8.1.tar.xz
+        FFMPEG_SHA256: 03ccc8a1cb534b97c2bc43f322ddb1b7c23bd325abb7e4c31aa37f4b4c0e648f
       run: |
         if [ "$RUNNER_OS" = "macOS" ]; then
           brew install ffmpeg
+          ffmpeg_bin="$(command -v ffmpeg)"
         else
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 5 --retry-connrefused --max-time 300 -O \
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_RELEASE_TAG}/${FFMPEG_ARCHIVE}"
+          echo "${FFMPEG_SHA256}  ${FFMPEG_ARCHIVE}" | sha256sum -c -
+          tar -xf "$FFMPEG_ARCHIVE"
+          echo "$RUNNER_TEMP/${FFMPEG_ARCHIVE%.tar.xz}/bin" >> "$GITHUB_PATH"
+          ffmpeg_bin="$RUNNER_TEMP/${FFMPEG_ARCHIVE%.tar.xz}/bin/ffmpeg"
         fi
+        # The daemon requires an ffmpeg built with libx264.
+        "$ffmpeg_bin" -version | grep -q enable-libx264
 
     # Build the standalone daemon binary before `pip install .` so the
     # [tool.maturin] include bundles it into the built wheel; without it the
