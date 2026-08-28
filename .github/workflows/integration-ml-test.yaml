@@ -29,6 +29,11 @@ on:
         required: false
         type: boolean
         default: true
+      data-daemon-diagnostics:
+        description: "Upload daemon diagnostics after a daemon-backed test"
+        required: false
+        type: boolean
+        default: false
     secrets:
       STAGING_SERVICE_API_KEY:
         required: false
@@ -38,6 +43,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    env:
+      NCD_TEST_REPORT_DIR: ${{ github.workspace }}/.ml_test_reports/${{ inputs.environment }}
+      NCD_TEST_REPORT_HTML: ${{ github.workspace }}/ml-${{ inputs.environment }}-report-run${{ github.run_id }}-attempt${{ github.run_attempt }}.html
     steps:
       - name: Show disk space
         run: df -h /
@@ -78,6 +86,9 @@ jobs:
           version: ${{ steps.harness.outputs.release-tag }}
           extras: ${{ inputs.extras }}
 
+      - name: Prepare Allure report directory
+        run: mkdir -p "$NCD_TEST_REPORT_DIR/allure-results"
+
       - name: Run Integration Test
         env:
           ENVIRONMENT: ${{ inputs.environment }}
@@ -87,6 +98,19 @@ jobs:
           NEURACORE_ENDPOINT_TIMEOUT: 30
           DISPLAY: :0
           TEST_PATH: ${{ inputs.test-path }}
+          # The daemon otherwise writes to ~/.neuracore/data_daemon; point it
+          # into the report dir and have each test attach daemon.log/state.db
+          # to its own Allure result (see tests/integration/ml/conftest.py in
+          # the neuracore repo).
+          NEURACORE_DAEMON_DB_PATH: ${{ env.NCD_TEST_REPORT_DIR }}/data_daemon/state.db
+          NCD_ATTACH_DAEMON_DIAGNOSTICS: ${{ inputs.data-daemon-diagnostics }}
+          # Opt-in structured per-phase timing the Rust daemon itself emits
+          # (upload, registration, pipeline dispatch, trace handling — see
+          # rust/data_daemon/src/perf_events.rs in the neuracore repo).
+          # Allure only records top-level test start/stop; this is the
+          # actual function-level timing data.
+          NCD_PERF_METRICS: ${{ inputs.data-daemon-diagnostics }}
+          NCD_PERF_EVENTS_PATH: ${{ env.NCD_TEST_REPORT_DIR }}/data_daemon/phase-events.jsonl
         run: |
           Xvfb $DISPLAY -screen 0 1280x1024x24 &
           pytest \
@@ -94,8 +118,71 @@ jobs:
             --log-cli-level=INFO \
             --log-cli-format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s" \
             --log-cli-date-format="%H:%M:%S" \
+            --alluredir="$NCD_TEST_REPORT_DIR/allure-results" \
+            --clean-alluredir \
+            --junitxml="$NCD_TEST_REPORT_DIR/junit.xml" \
             -v \
             "$TEST_PATH"
 
+      - name: Generate Allure report
+        if: always()
+        continue-on-error: true
+        run: |
+          if find "$NCD_TEST_REPORT_DIR/allure-results" -type f -print -quit | grep -q .; then
+            npx --yes allure@3.14.3 awesome \
+              --single-file \
+              --output "$NCD_TEST_REPORT_DIR/allure-report" \
+              "$NCD_TEST_REPORT_DIR/allure-results"
+            cp "$NCD_TEST_REPORT_DIR/allure-report/index.html" "$NCD_TEST_REPORT_HTML"
+          else
+            echo "No Allure results were produced"
+          fi
+
+      # Upload Allure's self-contained page directly, without archiving it, so
+      # the artifact link opens straight in a browser instead of requiring a
+      # zip download.
+      - name: Upload HTML report
+        id: upload-report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ml-${{ inputs.environment }}-report-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          path: ${{ env.NCD_TEST_REPORT_HTML }}
+          archive: false
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Add report to job summary
+        if: always() && steps.upload-report.outputs.artifact-url != ''
+        continue-on-error: true
+        env:
+          REPORT_URL: ${{ steps.upload-report.outputs.artifact-url }}
+        run: |
+          {
+            echo "### ML integration test report"
+            echo
+            echo "[Open the self-contained HTML report]($REPORT_URL)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The self-contained HTML report above embeds daemon.log/state.db as
+      # per-test attachments, but those are base64 blobs inside the page, not
+      # files a tool can pull off the run. Upload the raw allure-results/
+      # report, junit.xml, and daemon diagnostics as a second artifact so
+      # they're retrievable directly.
+      - name: Upload data-daemon diagnostics
+        if: always() && inputs.data-daemon-diagnostics
+        continue-on-error: true
+        uses: NeuracoreAI/shared-workflows/actions/upload-data-daemon-diagnostics@main
+        with:
+          artifact-name: ml-${{ inputs.environment }}
+          state-directory: ${{ env.NCD_TEST_REPORT_DIR }}/data_daemon
+          additional-paths: |
+            ${{ env.NCD_TEST_REPORT_DIR }}/allure-results
+            ${{ env.NCD_TEST_REPORT_DIR }}/allure-report
+            ${{ env.NCD_TEST_REPORT_DIR }}/junit.xml
+            ${{ env.NCD_TEST_REPORT_DIR }}/data_daemon/phase-events.jsonl
+
       - name: Show disk space after tests
+        if: always()
         run: df -h /

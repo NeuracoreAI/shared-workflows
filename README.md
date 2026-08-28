@@ -16,7 +16,7 @@ Called with `uses:` at the *job* level from a consumer repo:
 | `pr-check-label.yaml` | `required-labels`, `runs-on` |
 | `pr-changelog-reminder.yaml`| `trigger-labels`, `changelog-path`, `runs-on` |
 | `code-freeze-gate.yaml` | `runs-on`; secret `actions-read-token` (actions:read on the integration-test repos) |
-| `integration-ml-test.yaml` | `environment` (staging \| production), `test-path`, `extras`, `lfs` |
+| `integration-ml-test.yaml` | `environment` (staging \| production), `test-path`, `extras`, `lfs`, `data-daemon-diagnostics` |
 
 ### Composite actions (`actions/`)
 
@@ -27,6 +27,7 @@ Referenced at the *step* level:
 | `actions/checkout-test-harness` | Checks out the calling repo's integration test suite at the right ref and prints a harness summary. staging: the caller's branch; production: the latest `v*` release tag, verified after checkout (an explicit `ref` input overrides both). Optional LFS pull. Exposes the resolved `ref` and the production `release-tag` (for installing the matching released package). |
 | `actions/setup-neuracore-from-source` | Checkout of the neuracore source (optional) + Rust toolchain + cargo cache + FFmpeg + build daemon binary + `pip install .` + verify the bundled daemon. Works both from consumer repos (frontend, with `path: neuracore`) and inside the `neuracore` repo itself (`checkout: "false"`, `path: "."`). |
 | `actions/setup-neuracore-from-pypi` | Installs the released `neuracore` wheel from PyPI, optionally pinned to a version (e.g. the `release-tag` output of `checkout-test-harness`), with optional pip extras and PyTorch CPU wheel index, then verifies the install by importing it. Used by production-style integration tests. |
+| `actions/upload-data-daemon-diagnostics` | Best-effort upload of daemon logs and SQLite state, with optional explicit analytics paths. Includes hidden files, retains artifacts for 14 days by default, and links the artifact from the job summary. Matrix callers supply their distinguishing axes in `artifact-name`; run and rerun context is appended automatically. |
 
 ## Consumer usage
 
@@ -53,4 +54,3 @@ Notes:
 
 - Python must be set up by the caller before the neuracore setup actions (cache
   paths are repo-specific).
-
