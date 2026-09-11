@@ -68,7 +68,21 @@ runs:
         echo "harness_ref=$harness_ref" >> "$GITHUB_OUTPUT"
         echo "Resolved test harness ref: $harness_ref"
 
+    # Production installs the released wheel from PyPI, so the checked-out
+    # neuracore/ package is excluded to stop it shadowing that wheel.
+    - name: Checkout test harness (production)
+      if: inputs.environment == 'production'
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ steps.harness-ref.outputs.harness_ref }}
+        fetch-depth: 0
+        sparse-checkout: |
+          /*
+          !/neuracore/
+        sparse-checkout-cone-mode: false
+
     - name: Checkout test harness
+      if: inputs.environment != 'production'
       uses: actions/checkout@v4
       with:
         ref: ${{ steps.harness-ref.outputs.harness_ref }}
