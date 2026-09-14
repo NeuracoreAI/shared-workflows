@@ -12,6 +12,10 @@ inputs:
     description: "Check out the neuracore source (default branch of NeuracoreAI/neuracore). Set to 'false' when running inside the neuracore repo itself (with path: '.')"
     required: false
     default: "true"
+  ref:
+    description: "Branch, tag or SHA of NeuracoreAI/neuracore to check out. Empty checks out the default branch. Ignored when checkout is 'false'."
+    required: false
+    default: ""
   path:
     description: "Path to the neuracore source tree, relative to the workspace"
     required: false
@@ -37,6 +41,7 @@ runs:
       uses: actions/checkout@v4
       with:
         repository: "NeuracoreAI/neuracore"
+        ref: ${{ inputs.ref }}
         path: ${{ inputs.path }}
         sparse-checkout: |
           neuracore
