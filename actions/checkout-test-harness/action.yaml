@@ -69,7 +69,9 @@ runs:
         echo "Resolved test harness ref: $harness_ref"
 
     # Production installs the released wheel from PyPI, so the checked-out
-    # neuracore/ package is excluded to stop it shadowing that wheel.
+    # neuracore/ package is excluded to stop it shadowing that wheel. The
+    # importer config tree is re-included for the importer tests, and carries no
+    # neuracore/__init__.py, so the wheel still wins the import.
     - name: Checkout test harness (production)
       if: inputs.environment == 'production'
       uses: actions/checkout@v4
@@ -79,6 +81,7 @@ runs:
         sparse-checkout: |
           /*
           !/neuracore/
+          /neuracore/importer/config/
         sparse-checkout-cone-mode: false
 
     - name: Checkout test harness
