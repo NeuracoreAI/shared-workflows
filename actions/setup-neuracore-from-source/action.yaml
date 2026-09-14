@@ -2,9 +2,10 @@ name: "Set up Neuracore (from source)"
 description: >
   Checks out the neuracore source, builds the Rust data-daemon
   binary with rust/scripts/build_wheel_artefacts.sh and installs the neuracore
-  Python package from the checkout so maturin bundles the binary into the
-  wheel, then verifies the installed package and daemon bundle. Used by
-  staging-style integration tests.
+  Python package from the checkout as an editable install, so the checkout is
+  the importable package and carries both native artefacts, then verifies the
+  installed package and daemon bundle. Used by staging-style integration
+  tests.
   Python must already be set up by the caller (actions/setup-python).
 
 inputs:
@@ -73,9 +74,9 @@ runs:
       shell: bash
       run: ffmpeg -version | grep -q enable-libx264
 
-    # Build the standalone daemon binary before `pip install .` so the
-    # [tool.maturin] include bundles it into the built wheel; without it the
-    # SDK has no daemon to launch.
+    # Build the standalone daemon binary before the install so it is staged at
+    # neuracore/data_daemon/bin/data-daemon, where the SDK looks for it; without
+    # it the SDK has no daemon to launch.
     - name: Build data-daemon binary
       shell: bash
       working-directory: ${{ inputs.path }}
@@ -99,9 +100,9 @@ runs:
           spec=".[$EXTRAS]"
         fi
         if [ "$PYTORCH_CPU" = "true" ]; then
-          pip install --no-cache-dir "$spec" --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install --no-cache-dir -e "$spec" --extra-index-url https://download.pytorch.org/whl/cpu
         else
-          pip install --no-cache-dir "$spec"
+          pip install --no-cache-dir -e "$spec"
         fi
 
     # Staging tests run against unreleased neuracore_types.
@@ -114,8 +115,8 @@ runs:
         pip install --no-cache-dir --force-reinstall --no-deps \
           "neuracore_types @ git+https://github.com/NeuracoreAI/neuracore_types.git@${NEURACORE_TYPES_REF}"
 
-    # cd away from the checkout so `import neuracore` resolves to the
-    # installed wheel, not the source tree the binary was staged into.
+    # cd away from the checkout so `import neuracore` resolves through the
+    # install rather than the working directory.
     - name: Verify installed neuracore
       shell: bash
       run: |
