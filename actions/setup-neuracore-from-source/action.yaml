@@ -34,6 +34,17 @@ inputs:
     required: false
     default: "main"
 
+outputs:
+  neuracore-version:
+    description: "Installed neuracore version"
+    value: ${{ steps.verify.outputs.neuracore-version }}
+  neuracore-types-version:
+    description: "Installed neuracore_types version, or empty when not installed"
+    value: ${{ steps.verify.outputs.neuracore-types-version }}
+  neuracore-types-sha:
+    description: "Commit neuracore-types-ref resolved to, or empty when types came from PyPI"
+    value: ${{ steps.types.outputs.neuracore-types-sha }}
+
 runs:
   using: "composite"
   steps:
@@ -105,29 +116,51 @@ runs:
           pip install --no-cache-dir -e "$spec"
         fi
 
-    # Staging tests run against unreleased neuracore_types.
+    # Staging tests run against unreleased neuracore_types. A branch ref moves,
+    # so record the commit it pointed at for whoever reads the results later.
     - name: Install neuracore_types from git ref
+      id: types
       if: inputs.neuracore-types-ref != ''
       shell: bash
       env:
         NEURACORE_TYPES_REF: ${{ inputs.neuracore-types-ref }}
       run: |
+        repo="https://github.com/NeuracoreAI/neuracore_types.git"
         pip install --no-cache-dir --force-reinstall --no-deps \
-          "neuracore_types @ git+https://github.com/NeuracoreAI/neuracore_types.git@${NEURACORE_TYPES_REF}"
+          "neuracore_types @ git+${repo}@${NEURACORE_TYPES_REF}"
+
+        # Empty when the ref is already a SHA, which ls-remote does not resolve.
+        sha="$(git ls-remote "$repo" "$NEURACORE_TYPES_REF" | cut -f1 | head -n 1)"
+        echo "neuracore-types-sha=${sha:-$NEURACORE_TYPES_REF}" >> "$GITHUB_OUTPUT"
 
     # cd away from the checkout so `import neuracore` resolves through the
     # install rather than the working directory.
     - name: Verify installed neuracore
+      id: verify
       shell: bash
       run: |
         cd "$RUNNER_TEMP"
         python - << 'PYEOF'
+        import importlib.metadata as md
         import os
 
         import neuracore
         from neuracore.data_daemon.binary import data_daemon_binary_path
 
-        print(f"Installed neuracore version: {neuracore.__version__}")
+        versions = {"neuracore-version": neuracore.__version__}
+        try:
+            versions["neuracore-types-version"] = md.version("neuracore_types")
+        except md.PackageNotFoundError:
+            pass
+
+        for name, version in versions.items():
+            print(f"Installed {name.removesuffix('-version')} version: {version}")
+
+        # Published so callers can record what was tested (see the
+        # publish-ci-manifest action) without re-deriving it.
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            for name, version in versions.items():
+                output.write(f"{name}={version}\n")
 
         # Fail fast if the daemon bundle didn't install -- otherwise every
         # daemon-backed call fails later with a less obvious error.
