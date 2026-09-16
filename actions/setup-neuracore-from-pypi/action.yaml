@@ -20,6 +20,14 @@ inputs:
     required: false
     default: "false"
 
+outputs:
+  neuracore-version:
+    description: "Installed neuracore version"
+    value: ${{ steps.verify.outputs.neuracore-version }}
+  neuracore-types-version:
+    description: "Installed neuracore_types version, or empty when not installed"
+    value: ${{ steps.verify.outputs.neuracore-types-version }}
+
 runs:
   using: "composite"
   steps:
@@ -58,10 +66,27 @@ runs:
         fi
 
     - name: Verify installed neuracore
+      id: verify
       shell: bash
       run: |
         python - << 'EOF'
+        import importlib.metadata as md
+        import os
+
         import neuracore
 
-        print(f"Installed neuracore version: {neuracore.__version__}")
+        versions = {"neuracore-version": neuracore.__version__}
+        try:
+            versions["neuracore-types-version"] = md.version("neuracore_types")
+        except md.PackageNotFoundError:
+            pass
+
+        for name, version in versions.items():
+            print(f"Installed {name.removesuffix('-version')} version: {version}")
+
+        # Published so callers can record what was tested (see the
+        # publish-ci-manifest action) without re-deriving it.
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            for name, version in versions.items():
+                output.write(f"{name}={version}\n")
         EOF

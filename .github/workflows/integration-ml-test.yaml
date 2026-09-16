@@ -65,6 +65,10 @@ jobs:
           environment: ${{ inputs.environment }}
           lfs: ${{ inputs.lfs }}
 
+      - name: Resolve built commit
+        id: built
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
@@ -72,6 +76,7 @@ jobs:
           cache: "pip"
 
       - name: Set up neuracore with Rust data daemon
+        id: setup-source
         if: inputs.environment == 'staging'
         uses: NeuracoreAI/shared-workflows/actions/setup-neuracore-from-source@main
         with:
@@ -80,6 +85,7 @@ jobs:
           extras: ${{ inputs.extras }}
 
       - name: Set up neuracore from PyPI
+        id: setup-pypi
         if: inputs.environment == 'production'
         uses: NeuracoreAI/shared-workflows/actions/setup-neuracore-from-pypi@main
         with:
@@ -186,3 +192,23 @@ jobs:
       - name: Show disk space after tests
         if: always()
         run: df -h /
+
+      # What was actually tested, published as structured data for the CI
+      # dashboard so it does not have to read it back out of this job's log.
+      - name: Publish CI manifest
+        if: always()
+        uses: NeuracoreAI/shared-workflows/actions/publish-ci-manifest@main
+        with:
+          kind: integration-test
+          service: neuracore
+          environment: ${{ inputs.environment }}
+          artifact-label: ml-${{ inputs.environment }}
+          built-ref: ${{ steps.harness.outputs.ref }}
+          built-sha: ${{ steps.built.outputs.sha || github.sha }}
+          packages: |
+            neuracore=${{ steps.setup-source.outputs.neuracore-version || steps.setup-pypi.outputs.neuracore-version }}
+            neuracore-types=${{ steps.setup-source.outputs.neuracore-types-version || steps.setup-pypi.outputs.neuracore-types-version }}
+          extra: >-
+            {"test_path": "${{ inputs.test-path }}",
+            "neuracore_types_sha": "${{ steps.setup-source.outputs.neuracore-types-sha }}",
+            "report_url": "${{ steps.upload-report.outputs.artifact-url }}"}

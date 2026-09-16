@@ -1,0 +1,198 @@
+name: "Publish CI manifest"
+description: >
+  Publish a small JSON manifest describing what a run actually built or
+  deployed -- the ref, the resolved package versions, the environment -- as a
+  run artifact named ci-manifest-*. The CI dashboard reads these instead of
+  parsing job logs. Best-effort: every step is continue-on-error, so a manifest
+  can never fail the deploy or test it describes.
+
+inputs:
+  kind:
+    description: "What the run did: 'deploy' or 'integration-test'"
+    required: false
+    default: "deploy"
+  service:
+    description: "Service the manifest is about, e.g. 'backend', 'frontend', 'neuracore'"
+    required: false
+    default: ""
+  environment:
+    description: "Environment the run targeted: 'staging' or 'production'"
+    required: false
+    default: ""
+  built-ref:
+    description: >
+      The ref that was actually checked out and built. Defaults to the ref the
+      workflow was triggered on, which is NOT the same thing when a deploy
+      checks out a release tag passed as an input.
+    required: false
+    default: ${{ github.ref_name }}
+  built-sha:
+    description: "Commit the built-ref resolved to"
+    required: false
+    default: ${{ github.sha }}
+  service-version:
+    description: "Version of the service itself, e.g. '17.2.0'"
+    required: false
+    default: ""
+  packages:
+    description: "Resolved package versions, newline-separated 'name=version' pairs"
+    required: false
+    default: ""
+  extra:
+    description: "JSON object of anything else worth recording, merged in under 'extra'"
+    required: false
+    default: "{}"
+  artifact-label:
+    description: >
+      Short label distinguishing this manifest from others in the same run
+      (matrix callers must set it). The ci-manifest- prefix and the job, run
+      and rerun context are added here -- the prefix is what the dashboard
+      discovers the artifact by, so it is not configurable.
+    required: false
+    default: ""
+  retention-days:
+    description: "Number of days to retain the artifact"
+    required: false
+    default: "90"
+
+outputs:
+  artifact-id:
+    description: "GitHub artifact ID, or empty when nothing was uploaded"
+    value: ${{ steps.upload.outputs.artifact-id }}
+  artifact-name:
+    description: "Resolved unique artifact name"
+    value: ${{ steps.build.outputs.artifact-name }}
+  artifact-url:
+    description: "GitHub artifact URL, or empty when nothing was uploaded"
+    value: ${{ steps.upload.outputs.artifact-url }}
+  manifest-path:
+    description: "Path of the written manifest on the runner"
+    value: ${{ steps.build.outputs.manifest-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Build manifest
+      id: build
+      continue-on-error: true
+      shell: bash
+      env:
+        KIND: ${{ inputs.kind }}
+        SERVICE: ${{ inputs.service }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        BUILT_REF: ${{ inputs.built-ref }}
+        BUILT_SHA: ${{ inputs.built-sha }}
+        SERVICE_VERSION: ${{ inputs.service-version }}
+        PACKAGES: ${{ inputs.packages }}
+        EXTRA: ${{ inputs.extra }}
+        ARTIFACT_LABEL: ${{ inputs.artifact-label }}
+      run: |
+        set -euo pipefail
+
+        raw_name="ci-manifest-${ARTIFACT_LABEL}-${GITHUB_JOB}-run${GITHUB_RUN_ID}-attempt${GITHUB_RUN_ATTEMPT}"
+        artifact_name="$(printf '%s' "$raw_name" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/-+/-/g; s/^-+//; s/-+$//')"
+
+        manifest_dir="${RUNNER_TEMP}/ci-manifest"
+        manifest_path="${manifest_dir}/manifest.json"
+        mkdir -p "$manifest_dir"
+
+        # "name=version" lines -> {"name": "version"}. Versions may contain '='
+        # (local version identifiers), so only the first one splits.
+        packages_json="$(printf '%s\n' "$PACKAGES" | jq -R -s '
+          split("\n")
+          | map(select(test("=")))
+          | map(sub("^\\s+|\\s+$"; "") | split("=") | {key: .[0], value: (.[1:] | join("="))})
+          | from_entries
+          | with_entries(select(.value != ""))')"
+
+        # A caller passing malformed JSON should still get a manifest.
+        if ! extra_json="$(printf '%s' "$EXTRA" | jq -ce 'select(type == "object")')"; then
+          echo "::warning title=CI manifest::'extra' is not a JSON object, ignoring it"
+          extra_json="{}"
+        fi
+
+        jq -n \
+          --arg kind "$KIND" \
+          --arg service "$SERVICE" \
+          --arg environment "$ENVIRONMENT" \
+          --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --arg repo "$GITHUB_REPOSITORY" \
+          --arg workflow "$GITHUB_WORKFLOW" \
+          --arg job "$GITHUB_JOB" \
+          --arg event "$GITHUB_EVENT_NAME" \
+          --arg actor "$GITHUB_ACTOR" \
+          --arg run_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+          --argjson run_id "$GITHUB_RUN_ID" \
+          --argjson run_number "$GITHUB_RUN_NUMBER" \
+          --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+          --arg built_ref "$BUILT_REF" \
+          --arg built_sha "$BUILT_SHA" \
+          --arg trigger_ref "$GITHUB_REF_NAME" \
+          --arg trigger_sha "$GITHUB_SHA" \
+          --arg service_version "$SERVICE_VERSION" \
+          --argjson packages "$packages_json" \
+          --argjson extra "$extra_json" \
+          'def nz: if . == "" then null else . end;
+           {
+             schema: 1,
+             kind: $kind,
+             service: ($service | nz),
+             environment: ($environment | nz),
+             generated_at: $generated_at,
+             repo: $repo,
+             run: {
+               id: $run_id,
+               number: $run_number,
+               attempt: $run_attempt,
+               workflow: $workflow,
+               job: $job,
+               event: $event,
+               actor: $actor,
+               url: $run_url
+             },
+             built: {
+               ref: ($built_ref | nz),
+               sha: ($built_sha | nz),
+               trigger_ref: ($trigger_ref | nz),
+               trigger_sha: ($trigger_sha | nz)
+             },
+             service_version: ($service_version | nz),
+             packages: $packages,
+             extra: $extra
+           }' > "$manifest_path"
+
+        cat "$manifest_path"
+        {
+          echo "artifact-name=$artifact_name"
+          echo "manifest-path=$manifest_path"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Upload manifest
+      id: upload
+      if: steps.build.outputs.manifest-path != ''
+      continue-on-error: true
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ steps.build.outputs.artifact-name }}
+        path: ${{ steps.build.outputs.manifest-path }}
+        if-no-files-found: warn
+        retention-days: ${{ inputs.retention-days }}
+
+    - name: Add manifest to job summary
+      if: always() && steps.upload.outputs.artifact-url != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        ARTIFACT_NAME: ${{ steps.build.outputs.artifact-name }}
+        ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        MANIFEST_PATH: ${{ steps.build.outputs.manifest-path }}
+      run: |
+        {
+          echo "### CI manifest"
+          echo
+          echo "[Download \`$ARTIFACT_NAME\`]($ARTIFACT_URL)"
+          echo
+          echo '```json'
+          cat "$MANIFEST_PATH"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
