@@ -4,9 +4,11 @@ name: Code Freeze Gate
 # Production suites stay visible on the CI dashboard but do not gate merges.
 # Workflow selection matches the CI dashboard (ci_dashboard/scripts/fetch_actions_data.py),
 # restricted to staging suites;
-# pass/fail is the latest schedule/workflow_dispatch run that concluded
-# success or failure, so a manual re-run after a fix lifts the freeze without
-# waiting for the next night and cancelled runs carry no signal.
+# pass/fail is the latest schedule/workflow_dispatch run that carries a verdict,
+# so a manual re-run after a fix lifts the freeze without waiting for the next
+# night. A scheduled run that was cancelled or timed out counts as a failure
+# because it was meant to run to completion; a cancelled manual run carries no
+# signal, because the person who stopped it did not say why.
 # PRs labeled type:hotfix are exempt. State is reported as the `code-freeze`
 # commit status on each PR head SHA plus a marker comment while blocked.
 
@@ -60,6 +62,18 @@ jobs:
           const repos = ['neuracore', 'neuracore_frontend', 'neuracore_backend'];
           const stagingRe = /\(staging\)\s*$/i;
 
+          // A run's verdict, or null when it carries no signal and the gate
+          // should keep looking further back.
+          const verdictOf = (run) => {
+            const dispatched = run.event === 'workflow_dispatch';
+            if ((run.event !== 'schedule' && !dispatched) || run.status !== 'completed') return null;
+            if (run.conclusion === 'success') return { passed: true, run };
+            if (run.conclusion === 'failure') return { passed: false, run };
+            const stopped = run.conclusion === 'cancelled' || run.conclusion === 'timed_out';
+            if (stopped && !dispatched) return { passed: false, run };
+            return null;
+          };
+
           const failing = [];
           let tracked = 0;
           try {
@@ -79,16 +93,13 @@ jobs:
                 if (!runs.some(run => run.event === 'schedule')) continue;
 
                 tracked++;
-                const latest = runs.find(run =>
-                  (run.event === 'schedule' || run.event === 'workflow_dispatch') &&
-                  run.status === 'completed' &&
-                  (run.conclusion === 'success' || run.conclusion === 'failure'));
-                if (!latest || latest.conclusion === 'success') continue;
+                const latest = runs.map(verdictOf).find(verdict => verdict !== null);
+                if (!latest || latest.passed) continue;
 
                 failing.push({
                   name: wf.name,
                   repo,
-                  url: latest.html_url,
+                  url: latest.run.html_url,
                 });
               }
             }
