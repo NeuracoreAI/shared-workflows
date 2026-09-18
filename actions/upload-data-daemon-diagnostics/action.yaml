@@ -1,7 +1,8 @@
 name: "Upload data-daemon diagnostics"
 description: >
-  Upload the data daemon's log and SQLite state, plus explicitly configured
-  test reports, without changing the result of the test step that preceded it.
+  Upload the data daemon's log and its rotated generations, its SQLite state,
+  and explicitly configured test reports, without changing the result of the
+  test step that preceded it.
 
 inputs:
   artifact-name:
@@ -62,10 +63,12 @@ runs:
         retention-days: ${{ inputs.retention-days }}
         path: |
           ${{ inputs.state-directory }}/daemon.log
+          ${{ inputs.state-directory }}/daemon.log.*
           ${{ inputs.state-directory }}/state.db
           ${{ inputs.state-directory }}/state.db-wal
           ${{ inputs.state-directory }}/state.db-shm
           ${{ inputs.state-directory }}/artifacts/**/daemon.log
+          ${{ inputs.state-directory }}/artifacts/**/daemon.log.*
           ${{ inputs.state-directory }}/artifacts/**/state.db
           ${{ inputs.state-directory }}/artifacts/**/state.db-wal
           ${{ inputs.state-directory }}/artifacts/**/state.db-shm
