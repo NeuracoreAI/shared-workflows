@@ -21,6 +21,10 @@ inputs:
     description: "Path to the neuracore source tree, relative to the workspace"
     required: false
     default: "neuracore"
+  examples:
+    description: "Also check out examples/ with its Git LFS assets, for tests that run the example sims. Needs the 'examples' extra. Ignored when checkout is 'false'."
+    required: false
+    default: "false"
   extras:
     description: "Comma-separated pip extras, e.g. 'dev,ml,examples'"
     required: false
@@ -58,6 +62,8 @@ runs:
         sparse-checkout: |
           neuracore
           rust
+          ${{ inputs.examples == 'true' && 'examples' || '' }}
+        lfs: ${{ inputs.examples == 'true' }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
