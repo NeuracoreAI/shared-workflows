@@ -30,9 +30,9 @@ inputs:
     required: false
     default: ""
   pytorch-cpu:
-    description: "Add the PyTorch CPU wheel index (used with the 'import' extra on CI runners)"
+    description: "Install CPU-only PyTorch from the PyTorch CPU wheel index. Set to 'false' on GPU runners that need CUDA PyTorch."
     required: false
-    default: "false"
+    default: "true"
   neuracore-types-ref:
     description: "Git ref of neuracore_types to install over the PyPI copy. Set to '' to keep the published version."
     required: false
