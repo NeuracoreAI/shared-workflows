@@ -32,7 +32,7 @@ runs:
   using: "composite"
   steps:
     - name: Checkout repository metadata
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7.0.1
       with:
         fetch-depth: 0
 
@@ -74,7 +74,7 @@ runs:
     # neuracore/__init__.py, so the wheel still wins the import.
     - name: Checkout test harness (production)
       if: inputs.environment == 'production'
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7.0.1
       with:
         ref: ${{ steps.harness-ref.outputs.harness_ref }}
         fetch-depth: 0
@@ -86,7 +86,7 @@ runs:
 
     - name: Checkout test harness
       if: inputs.environment != 'production'
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7.0.1
       with:
         ref: ${{ steps.harness-ref.outputs.harness_ref }}
         fetch-depth: 0

@@ -53,7 +53,7 @@ jobs:
     - name: Compute freeze state
       id: freeze
       if: steps.guard.outputs.skip != 'true'
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9.0.0
       with:
         github-token: ${{ secrets.actions-read-token }}
         retries: 3
@@ -115,7 +115,7 @@ jobs:
 
     - name: Apply gate to pull requests
       if: steps.guard.outputs.skip != 'true'
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9.0.0
       env:
         FREEZE_STATE: ${{ steps.freeze.outputs.state }}
       with:

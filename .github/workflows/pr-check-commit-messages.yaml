@@ -24,7 +24,7 @@ jobs:
 
     steps:
     - name: Check PR title and commits
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9.0.0
       env:
         VALID_PREFIXES: ${{ inputs.valid-prefixes }}
       with:
